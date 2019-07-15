@@ -1,4 +1,5 @@
-escapeChar = frozenset(['_','\\'])
+escapeChar = frozenset(['_', '\\'])
+
 
 def main():
     while True:
@@ -6,11 +7,12 @@ def main():
         if code == "":
             break
         else:
-            print("".join(map(doEscape,code)))
+            print("".join(map(do_escape, code)))
 
-def doEscape(c):
+
+def do_escape(c):
     if c in escapeChar:
-        return "\\"+c
+        return "\\" + c
     else:
         return c
 
