@@ -1,4 +1,5 @@
 # coding=utf-8
+import sys
 from enum import Enum
 from typing import List
 
@@ -84,9 +85,9 @@ class Var:
 
 
 # 特殊节点, 输出时进行特出处理, 因此只需要保证类型正确即可
-NoneVar = Var(0, VarType.INVALID, "")   # 无效节点
-StartVar = Var(0, VarType.START, "")    # 开始节点
-EndVar = Var(0, VarType.END, "")        # 结束节点
+NoneVar = Var(0, VarType.INVALID, "")  # 无效节点
+StartVar = Var(0, VarType.START, "")  # 开始节点
+EndVar = Var(0, VarType.END, "")  # 结束节点
 
 
 class Line:
@@ -95,11 +96,25 @@ class Line:
         self.value = value
 
 
+NoneLine = Line(0, "NoneLine")
+
+
 class Parser:
     def __init__(self, filename: str):
         self.varTable: List[Var] = [StartVar, EndVar]
         self.connectTable: List[List[Var]] = []
         self.filename = filename
+        self.errorChecker = ErrorChecker()
+        self.currentLine = NoneLine
+
+    def compile(self, filename: str = "flowOutput"):
+        self.parseFile()
+        self.errorChecker.checkIntegrity(self.connectTable)
+        if self.errorChecker.errorCount == 0:
+            self.genCode(filename)
+            print("Compile Finish.\n0 Error 0 Warning.")
+        else:
+            self.errorChecker.print("Compile Failed.")
 
     def parseFile(self):
         with open(self.filename, "r", encoding="utf8") as f:
@@ -110,17 +125,11 @@ class Parser:
                     self.parseLine(Line(num, line.replace("\n", "")))
 
     def parseLine(self, line: Line):
+        self.currentLine = line
         if line.value[0] in segmentFirst:
             self.parseDef(line)
         else:
             self.parseStatement(line)
-
-    def genCode(self):
-        for var in self.varTable:
-            print(var.toDef())
-        print("\n")
-        for con in self.connectTable:
-            print("->".join(v.toConnectName() for v in con))
 
     def parseDef(self, line: Line):
         if line.value[0] == '<':
@@ -130,7 +139,7 @@ class Parser:
             info = line.value.replace("[]", "")
             self.varTable.append(Var(line.num, VarType.OPERATION, info))
         else:
-            print("不支持以{}开始的声明")
+            self.errorChecker.symbolNotSupportError(line)
 
     def parseStatement(self, line: Line):
         connects: List[Var] = []
@@ -157,7 +166,7 @@ class Parser:
             v = self.findVarById(varId)
             connects.append(self.setTypeBySelect(v, select))
         except ValueError:
-            print(f"标识符{var}无效")
+            self.errorChecker.undefinedTokenError(var, self.currentLine)
 
     def findVarById(self, varId: int) -> Var:
         for var in self.varTable:
@@ -165,17 +174,58 @@ class Parser:
                 return var.copy()
         return NoneVar
 
-    @staticmethod
-    def setTypeBySelect(var: Var, select: str) -> Var:
+    def setTypeBySelect(self, var: Var, select: str) -> Var:
         if select == "N/A":
             return var
         else:
+            self.errorChecker.checkIsCondition(var, self.currentLine)
             var.select = select
             var.varType = VarType.SELECTED
             return var
 
+    def genCode(self, filename: str):
+        with open(filename, "w", encoding="utf8") as f:
+            for var in self.varTable:
+                f.write(var.toDef())
+                f.write("\n")
+            f.write("\n")
+            for con in self.connectTable:
+                f.write("->".join(v.toConnectName() for v in con))
+                f.write("\n")
+
+
+class ErrorChecker:
+    def __init__(self):
+        self.errorCount = 0
+
+    def checkIsCondition(self, var: Var, line: Line):
+        if var.varType != VarType.CONDITION:
+            self.print(f"Error: Line {line.num}: {var.toConnectName()} is not a condition")
+            self.errorCount += 1
+
+    def symbolNotSupportError(self, line: Line):
+        self.print(f"Error: Line {line.num}: {{}} is not supported in this version.", )
+        self.errorCount += 1
+
+    def undefinedTokenError(self, var, line: Line):
+        self.print(f"Error: Line {line.num}: Token {var} is undefined.")
+        self.errorCount += 1
+
+    def checkIntegrity(self, connectTable: List[List[Var]]):
+        """检测每一个Condition是否都具有两个分支"""
+        pass
+
+    @staticmethod
+    def print(message):
+        sys.stderr.write(message)
+        sys.stderr.write("\n")
+
 
 if __name__ == "__main__":
-    parser = Parser("flowInput")
-    parser.parseFile()
-    parser.genCode()
+    print(sys.argv)
+    if len(sys.argv) >= 2:
+        parser = Parser(sys.argv[1])
+        parser.compile(sys.argv[1] + "_out")
+    else:
+        parser = Parser("flowInput")
+        parser.compile("flowOutput")
