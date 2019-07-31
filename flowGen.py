@@ -46,9 +46,10 @@ class VarType(Enum):
     EXIT = 0
     OPERATION = 1
     CONDITION = 2
-    START = 3
-    END = 4
-    SELECTED = 5  # 包含选择的条件语句 即yes分支或者no分支
+    SUBROUTINE = 3
+    START = 4
+    END = 5
+    SELECTED = 6  # 包含选择的条件语句 即yes分支或者no分支
 
 
 class Var:
@@ -66,6 +67,8 @@ class Var:
             return f"cnd{self.num}=>condition: {self.info}"
         elif self.varType == VarType.OPERATION:
             return f"opt{self.num}=>operation: {self.info}"
+        elif self.varType == VarType.SUBROUTINE:
+            return f"sub{self.num}=>subroutine: {self.info}"
         elif self.varType == VarType.START:
             return f"st=>start: 开始"
         elif self.varType == VarType.END:
@@ -76,6 +79,8 @@ class Var:
             return f"cnd{self.num}"
         elif self.varType == VarType.OPERATION:
             return f"opt{self.num}"
+        elif self.varType == VarType.SUBROUTINE:
+            return f"sub{self.num}"
         elif self.varType == VarType.START:
             return f"st"
         elif self.varType == VarType.END:
@@ -133,11 +138,14 @@ class Parser:
 
     def parseDef(self, line: Line):
         if line.value[0] == '<':
-            info = line.value.replace("<>", "")
+            info = line.value.replace("<> ", "")
             self.varTable.append(Var(line.num, VarType.CONDITION, info))
         elif line.value[0] == '[':
-            info = line.value.replace("[]", "")
+            info = line.value.replace("[] ", "")
             self.varTable.append(Var(line.num, VarType.OPERATION, info))
+        elif line.value[0] == '{':
+            info = line.value.replace("{} ", "")
+            self.varTable.append(Var(line.num, VarType.SUBROUTINE, info))
         else:
             self.errorChecker.symbolNotSupportError(line)
 
@@ -204,7 +212,7 @@ class ErrorChecker:
             self.errorCount += 1
 
     def symbolNotSupportError(self, line: Line):
-        self.print(f"Error: Line {line.num}: {{}} is not supported in this version.", )
+        self.print(f"Error: Line {line.num}: () is not supported in this version.", )
         self.errorCount += 1
 
     def undefinedTokenError(self, var, line: Line):
