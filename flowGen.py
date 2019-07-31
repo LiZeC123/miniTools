@@ -38,8 +38,6 @@ st和ed是内置变量, 分别表示开始节点和结束节点
 由于结构十分简单, 因此不需要词法分析, 可以直接处理
 '''
 
-segmentFirst = frozenset(['<', '>', '[', ']', '{', '}'])
-
 
 class VarType(Enum):
     INVALID = -1
@@ -105,6 +103,9 @@ NoneLine = Line(0, "NoneLine")
 
 
 class Parser:
+    # 以目前的语法结构来看, 只有左括号是first集, 不过可以先保留右括号, 以便于之后的扩展
+    segmentFirst = frozenset(['<', '>', '[', ']', '{', '}', '(', ')'])
+
     def __init__(self, filename: str):
         self.varTable: List[Var] = [StartVar, EndVar]
         self.connectTable: List[List[Var]] = []
@@ -131,7 +132,7 @@ class Parser:
 
     def parseLine(self, line: Line):
         self.currentLine = line
-        if line.value[0] in segmentFirst:
+        if line.value[0] in Parser.segmentFirst:
             self.parseDef(line)
         else:
             self.parseStatement(line)
@@ -180,7 +181,7 @@ class Parser:
         for var in self.varTable:
             if var.num == varId:
                 return var.copy()
-        return NoneVar
+        raise ValueError("Id not find")
 
     def setTypeBySelect(self, var: Var, select: str) -> Var:
         if select == "N/A":
