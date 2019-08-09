@@ -3,41 +3,6 @@ import sys
 from enum import Enum
 from typing import List
 
-'''
-由于输入的数据很多, 所以采取编译模式
-输入一个简单格式的文件, 转化为流程图的格式
-
-输入文件格式如下
---- 定义段 ---
-[] 操作节点
-<> 判断节点
-...
---- 操作段 ---
-st 1 2 3 4
-2y 5 
-2n 8
-8 ed
-...
-
-st和ed是内置变量, 分别表示开始节点和结束节点
-
-使用行号作为变量名, 所以文件的绝对位置不可改变, 否则会导致操作段的引用失效
-
-'''
-
-'''
-<语句>        -> <声明> | <操作>
-<声明>        -> <声明类型> <声明取值>
-<声明类型>    -> <> | [] | {}
-<声明取值>    -> string
-<操作>        -> <标识符><变量表>
-<变量表>      -> <变量><变量表> | e
-<变量>        -> <数字><分支选项>
-<分支选项>    -> y | n | e
-
-由于结构十分简单, 因此不需要词法分析, 可以直接处理
-'''
-
 
 class VarType(Enum):
     INVALID = -1
@@ -48,6 +13,17 @@ class VarType(Enum):
     START = 4
     END = 5
     SELECTED = 6  # 包含选择的条件语句 即yes分支或者no分支
+
+
+class ConnectType(Enum):
+    NONE = 0,
+    NORMAL = 1,
+    YSE = 2,
+    NO = 3,
+    LEFT = 4,
+    RIGHT = 5,
+    TOP = 6,
+    BOTTOM = 7
 
 
 class Var:
@@ -87,10 +63,146 @@ class Var:
             return f"cnd{self.num}({self.select})"
 
 
-# 特殊节点, 输出时进行特出处理, 因此只需要保证类型正确即可
-NoneVar = Var(0, VarType.INVALID, "")  # 无效节点
-StartVar = Var(0, VarType.START, "")  # 开始节点
-EndVar = Var(0, VarType.END, "")  # 结束节点
+class Node:
+    def __init__(self, info: str, varType: VarType, connectType: ConnectType):
+        self.info = info
+        self.varType = varType
+        self.connectType = connectType
+
+
+class VarTable:
+    # 特殊节点, 输出时进行特出处理, 因此只需要保证类型正确即可
+    NoneVar = Var(-1, VarType.INVALID, "")  # 无效节点
+    StartVar = Var(0, VarType.START, "")  # 开始节点
+    EndVar = Var(1, VarType.END, "")  # 结束节点
+
+    def __init__(self):
+        self.table: List[Var] = [self.StartVar, self.EndVar]
+        self.currentID = 1
+
+    def addVar(self, info, varType: VarType) -> Var:
+        self.currentID += 1
+        var = Var(self.currentID, varType, info)
+        self.table.append(var)
+        return var
+
+    def getVarByNode(self, node: Node) -> Var:
+        if node.varType == VarType.START:
+            return self.StartVar.copy()
+        elif node.varType == VarType.END:
+            return self.EndVar.copy()
+
+        for v in self.table:
+            if v.info == node.info and v.varType == node.varType:
+                return v.copy()
+
+        return self.addVar(node.info, node.varType)
+
+    def getVarByID(self, ID: int):
+        return self.table[ID]
+
+    def getVarNum(self):
+        return len(self.table)
+
+    def genCode(self, f):
+        for var in self.table:
+            f.write(var.toDef())
+            f.write("\n")
+
+
+class ConnectTable:
+    def __init__(self):
+        self.length = 15
+        self.graph: List[List[ConnectType]] = [[ConnectType.NONE for col in range(self.length)] for row in
+                                               range(self.length)]
+        self.ConnectNameDict = {
+            ConnectType.YSE: "yes", ConnectType.NO: "no",
+            ConnectType.LEFT: "left", ConnectType.RIGHT: "right",
+            ConnectType.TOP: "top", ConnectType.BOTTOM: "bottom"
+        }
+
+    def resize(self, toSize: int):
+        differ = toSize - self.length
+        for row in self.graph:
+            for i in range(differ):
+                row.append(ConnectType.NONE)
+        self.length = toSize
+
+    def addConnect(self, head: int, tail: int, conType: ConnectType):
+        if head >= self.length or tail >= self.length:
+            self.resize(max(head, tail))
+        self.graph[head][tail] = conType
+
+    def getNameByCon(self, con: ConnectType):
+        return self.ConnectNameDict[con]
+
+    def genCode(self, varTable: VarTable, f):
+        code = []
+        self.DFS(varTable, 0, code)
+        for c in self.reduceCode(code):
+            f.write(c)
+
+    def DFS(self, varTable: VarTable, row, code):
+        for col in range(len(self.graph[row])):
+            con = self.graph[row][col]
+            if con != ConnectType.NONE:
+                if con == ConnectType.NORMAL:
+                    name = f"{varTable.getVarByID(row).toConnectName()}"
+                else:
+                    name = f"{varTable.getVarByID(row).toConnectName()}({self.getNameByCon(con)})"
+                code.append(name)
+                code.append("->")
+                code.append(f"{varTable.getVarByID(col).toConnectName()}")
+                code.append("\n")
+                self.DFS(varTable, col, code)
+
+    @staticmethod
+    def reduceCode(code: List[str]):
+        newCode = []
+        length = len(code)
+        i = 0
+        while i < length:
+            if code[i] != "\n":
+                newCode.append(code[i])
+            elif i + 1 < length and code[i - 1] == code[i + 1]:
+                newCode.append("->")
+                i += 2
+            else:
+                newCode.append("\n")
+            i += 1
+        return newCode
+
+    def checkIntegrity(self, varTable: VarTable):
+        """检查每个节点是否有入度, 每个条件节点是否有两个分支"""
+        length = varTable.getVarNum()
+        node = 2  # 跳过start和end节点
+        while node < length:
+            self.checkReference(node, varTable)
+            if varTable.getVarByID(node).varType == VarType.CONDITION:
+                self.checkBranch(node, varTable)
+            node += 1
+
+    def checkBranch(self, node, varTable: VarTable):
+        yNode = False
+        nNode = False
+        for col in range(len(self.graph)):
+            if self.graph[node][col] == ConnectType.YSE:
+                yNode = True
+            elif self.graph[node][col] == ConnectType.NO:
+                nNode = True
+        if not yNode:
+            raise CheckException(f"Node ({varTable.getVarByID(node).info}) is missing a yes branch")
+        elif not nNode:
+            raise CheckException(f"Node ({varTable.getVarByID(node).info}) is missing a no branch")
+
+    def checkReference(self, node, varTable: VarTable):
+        referenced = False
+        for row in range(len(self.graph)):
+            if self.graph[row][node] != ConnectType.NONE:
+                referenced = True
+                break
+        if not referenced:
+            raise CheckException(f"Node ({varTable.getVarByID(node).info}) is not referenced by any node")
 
 
 class Line:
@@ -103,24 +215,28 @@ NoneLine = Line(0, "NoneLine")
 
 
 class Parser:
-    # 以目前的语法结构来看, 只有左括号是first集, 不过可以先保留右括号, 以便于之后的扩展
-    segmentFirst = frozenset(['<', '>', '[', ']', '{', '}', '(', ')'])
+    connectNameDict = {
+        "y": ConnectType.YSE, "n": ConnectType.NO,
+        "l": ConnectType.LEFT, "r": ConnectType.RIGHT,
+        "t": ConnectType.TOP, "b": ConnectType.BOTTOM
+    }
 
     def __init__(self, filename: str):
-        self.varTable: List[Var] = [StartVar, EndVar]
-        self.connectTable: List[List[Var]] = []
+        self.varTable: VarTable = VarTable()
+        self.connectTable: ConnectTable = ConnectTable()
         self.filename = filename
-        self.errorChecker = ErrorChecker()
         self.currentLine = NoneLine
 
     def compile(self, filename: str = "flowOutput"):
-        self.parseFile()
-        self.errorChecker.checkIntegrity(self.connectTable)
-        if self.errorChecker.errorCount == 0:
+        try:
+            self.parseFile()
+            # 代码生成前, 先检查关系完整性
+            self.connectTable.checkIntegrity(self.varTable)
             self.genCode(filename)
             print("Compile Finish.\n0 Error 0 Warning.")
-        else:
-            self.errorChecker.print("Compile Failed.")
+        except Exception as e:
+            sys.stderr.write("Compile Failed.\n")
+            sys.stderr.write(str(e))
 
     def parseFile(self):
         with open(self.filename, "r", encoding="utf8") as f:
@@ -132,102 +248,51 @@ class Parser:
 
     def parseLine(self, line: Line):
         self.currentLine = line
-        if line.value[0] in Parser.segmentFirst:
-            self.parseDef(line)
+        nodes = line.value.split()
+
+        if len(nodes) < 2:
+            raise CheckException(f"Error: Line {line.num}: The num of nodes less than 2")
+
+        for i in range(len(nodes) - 1):
+            node = self.parseNode(nodes[i])
+            varFst: Var = self.varTable.getVarByNode(node)
+            varSnd: Var = self.varTable.getVarByNode(self.parseNode(nodes[i + 1]))
+            self.connectTable.addConnect(varFst.num, varSnd.num, node.connectType)
+
+    def parseNode(self, varStr: str) -> Node:
+        # 只要此部分代码被执行, 在if中定义的变量离开if语句依然有效
+        if varStr[0] == '<':
+            varStr = varStr.replace("<", "").replace(">", "")
+            varType = VarType.CONDITION
+        elif varStr[0] == '[':
+            varStr = varStr.replace("[", "").replace("]", "")
+            varType = VarType.OPERATION
+        elif varStr[0] == '{':
+            varStr = varStr.replace("{", "").replace("}", "")
+            varType = VarType.SUBROUTINE
+        elif varStr == "st":
+            return Node("", VarType.START, ConnectType.NORMAL)
+        elif varStr == "ed":
+            return Node("", VarType.END, ConnectType.NORMAL)
         else:
-            self.parseStatement(line)
+            raise CheckException(f"Undefined type of {varStr}")
 
-    def parseDef(self, line: Line):
-        if line.value[0] == '<':
-            info = line.value.replace("<> ", "")
-            self.varTable.append(Var(line.num, VarType.CONDITION, info))
-        elif line.value[0] == '[':
-            info = line.value.replace("[] ", "")
-            self.varTable.append(Var(line.num, VarType.OPERATION, info))
-        elif line.value[0] == '{':
-            info = line.value.replace("{} ", "")
-            self.varTable.append(Var(line.num, VarType.SUBROUTINE, info))
+        if ":" in varStr:
+            info, typename = varStr.split(":")
+            return Node(info, varType, self.connectNameDict[typename])
         else:
-            self.errorChecker.symbolNotSupportError(line)
-
-    def parseStatement(self, line: Line):
-        connects: List[Var] = []
-        s = line.value.split()
-        for var in s:
-            if var == "st":
-                connects.append(StartVar.copy())
-            elif var == "ed":
-                connects.append(EndVar.copy())
-            else:
-                self.parseNum(connects, var)
-        self.connectTable.append(connects)
-
-    def parseNum(self, connects, var):
-        select = "N/A"
-        if var[-1] == "y":
-            select = "yes"
-        elif var[-1] == "n":
-            select = "no"
-
-        var = var.replace("y", "").replace("n", "")
-        try:
-            varId = int(var)
-            v = self.findVarById(varId)
-            connects.append(self.setTypeBySelect(v, select))
-        except ValueError:
-            self.errorChecker.undefinedTokenError(var, self.currentLine)
-
-    def findVarById(self, varId: int) -> Var:
-        for var in self.varTable:
-            if var.num == varId:
-                return var.copy()
-        raise ValueError("Id not find")
-
-    def setTypeBySelect(self, var: Var, select: str) -> Var:
-        if select == "N/A":
-            return var
-        else:
-            self.errorChecker.checkIsCondition(var, self.currentLine)
-            var.select = select
-            var.varType = VarType.SELECTED
-            return var
+            return Node(varStr, varType, ConnectType.NORMAL)
 
     def genCode(self, filename: str):
         with open(filename, "w", encoding="utf8") as f:
-            for var in self.varTable:
-                f.write(var.toDef())
-                f.write("\n")
+            self.varTable.genCode(f)
             f.write("\n")
-            for con in self.connectTable:
-                f.write("->".join(v.toConnectName() for v in con))
-                f.write("\n")
+            self.connectTable.genCode(self.varTable, f)
 
 
-class ErrorChecker:
-    def __init__(self):
-        self.errorCount = 0
-
-    def checkIsCondition(self, var: Var, line: Line):
-        if var.varType != VarType.CONDITION:
-            self.print(f"Error: Line {line.num}: {var.toConnectName()} is not a condition")
-            self.errorCount += 1
-
-    def symbolNotSupportError(self, line: Line):
-        self.print(f"Error: Line {line.num}: () is not supported in this version.", )
-        self.errorCount += 1
-
-    def undefinedTokenError(self, var, line: Line):
-        self.print(f"Error: Line {line.num}: Token {var} is undefined.")
-        self.errorCount += 1
-
-    def checkIntegrity(self, connectTable: List[List[Var]]):
-        """检测每一个Condition是否都具有两个分支"""
-        pass
-
-    @staticmethod
-    def print(message):
-        sys.stderr.write(message)
-        sys.stderr.write("\n")
+class CheckException(Exception):
+    def __init__(self, info):
+        Exception.__init__(self, info)
 
 
 if __name__ == "__main__":
