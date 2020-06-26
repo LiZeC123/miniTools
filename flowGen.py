@@ -170,7 +170,18 @@ class ConnectTable:
             else:
                 newCode.append("\n")
             i += 1
-        return newCode
+
+        # 由于部分分支节点需要多次遍历, 因此不能在深度优先算法中直接将遍历过的路径重置
+        # 否则分支节点只会出现一次
+        lineCode = []
+        s = ""
+        for c in newCode:
+            s += c
+            if c == "\n":
+                lineCode.append(s)
+                s = ""
+
+        return frozenset(lineCode)
 
     def checkIntegrity(self, varTable: VarTable):
         """检查每个节点是否有入度, 每个条件节点是否有两个分支"""
@@ -234,9 +245,11 @@ class Parser:
             self.connectTable.checkIntegrity(self.varTable)
             self.genCode(filename)
             print("Compile Finish.\n0 Error 0 Warning.")
-        except Exception as e:
-            sys.stderr.write("Compile Failed.\n")
-            sys.stderr.write(str(e))
+        finally:
+            pass
+        # except Exception as e:
+        #     sys.stderr.write("Compile Failed.\n")
+        #     sys.stderr.write(str(e))
 
     def parseFile(self):
         with open(self.filename, "r", encoding="utf8") as f:
@@ -262,13 +275,10 @@ class Parser:
     def parseNode(self, varStr: str) -> Node:
         # 只要此部分代码被执行, 在if中定义的变量离开if语句依然有效
         if varStr[0] == '<':
-            varStr = varStr.replace("<", "").replace(">", "")
             varType = VarType.CONDITION
         elif varStr[0] == '[':
-            varStr = varStr.replace("[", "").replace("]", "")
             varType = VarType.OPERATION
         elif varStr[0] == '{':
-            varStr = varStr.replace("{", "").replace("}", "")
             varType = VarType.SUBROUTINE
         elif varStr == "st":
             return Node("", VarType.START, ConnectType.NORMAL)
@@ -277,11 +287,21 @@ class Parser:
         else:
             raise CheckException(f"Undefined type of {varStr}")
 
+        varStr = self.removeBrackets(varStr)  # 移除两端的括号
         if ":" in varStr:
             info, typename = varStr.split(":")
             return Node(info, varType, self.connectNameDict[typename])
         else:
             return Node(varStr, varType, ConnectType.NORMAL)
+
+    @staticmethod
+    def removeBrackets(s: str):
+        colonIdx = s.find(":")
+        if colonIdx != -1:
+            s = s[1:colonIdx - 1] + s[colonIdx:]
+        else:
+            s = s[1:-1]
+        return s
 
     def genCode(self, filename: str):
         with open(filename, "w", encoding="utf8") as f:
@@ -301,5 +321,10 @@ if __name__ == "__main__":
         parser = Parser(sys.argv[1])
         parser.compile(sys.argv[1] + "_out")
     else:
-        parser = Parser("flowInput")
+        parser = Parser("flowTest/hashMapMain")
         parser.compile("flowOutput")
+
+    # 优化方案
+    # 分支节点选择最长的路径作为向下的路径
+    # 即从分支节点出发, 到两个分支的交汇点, 选择路径最长的分支
+    # 但是如果某个路径为0, 则依然选择0路径为向下路径
